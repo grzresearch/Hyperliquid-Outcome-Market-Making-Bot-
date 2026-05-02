@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Hyperliquid Outcome MM — Dashboard</title>
+  <link rel="stylesheet" href="/style.css" />
+  <script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <span class="logo">⬡</span>
+      <h1>Hyperliquid Outcome Market Maker</h1>
+    </div>
+    <div class="kpis">
+      <div class="kpi"><span>Realised PnL</span><b id="kpi-pnl">$0.00</b></div>
+      <div class="kpi"><span>Equity Peak</span><b id="kpi-peak">$0.00</b></div>
+      <div class="kpi"><span>Drawdown</span><b id="kpi-dd">$0.00</b></div>
+      <div class="kpi"><span>MD p50 / p99</span><b id="kpi-md">— / —</b></div>
+      <div class="kpi"><span>Order RTT p50 / p99</span><b id="kpi-rtt">— / —</b></div>
+      <div class="kpi"><span>Kill switch</span><b id="kpi-kill">OFF</b></div>
+    </div>
+  </header>
+
+  <main>
+    <section class="panel">
+      <h2>Cumulative PnL by strategy</h2>
+      <div id="plot-pnl" class="plot"></div>
+    </section>
+
+    <section class="panel">
+      <h2>3D — Avellaneda-Stoikov quote surface (σ × inventory × spread)</h2>
+      <p class="hint">
+        The optimal half-spread δ(σ, q) is a function of realised volatility σ
+        and outstanding inventory q. The surface visualises the quote shape
+        the bot is currently posting.
+      </p>
+      <div id="plot-as-surface" class="plot tall"></div>
+    </section>
+
+    <section class="panel">
+      <h2>3D — Cross-venue divergence (time × venue × YES price)</h2>
+      <p class="hint">
+        Each line is one venue's YES mid for the linked event. Vertical gaps
+        are the arb signal — the cross-venue strategy fires when the gap
+        exceeds the cost-adjusted threshold.
+      </p>
+      <div id="plot-xvenue" class="plot tall"></div>
+    </section>
+
+    <section class="panel">
+      <h2>3D — BTC parity surface (S × σ × digital fair value)</h2>
+      <p class="hint">
+        For the live binary contract, this is the Black-Scholes digital fair
+        value as the perp price S and realised vol σ vary. The dot is the
+        current state; if the YES mid is meaningfully off the surface, the
+        BTC parity strategy fires.
+      </p>
+      <div id="plot-parity" class="plot tall"></div>
+    </section>
+
+    <section class="panel two-col">
+      <div>
+        <h2>Top of book per market</h2>
+        <table id="book-table"><thead><tr>
+          <th>Market</th><th>Bid</th><th>Ask</th><th>Microprice</th>
+        </tr></thead><tbody></tbody></table>
+      </div>
+      <div>
+        <h2>Open positions</h2>
+        <table id="pos-table"><thead><tr>
+          <th>Market</th><th>Qty</th><th>Avg Entry</th><th>Realised</th>
+        </tr></thead><tbody></tbody></table>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Strategy signals (live tail)</h2>
+      <div id="plot-signals" class="plot"></div>
+    </section>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>

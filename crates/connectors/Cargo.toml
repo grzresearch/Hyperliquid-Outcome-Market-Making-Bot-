@@ -1,0 +1,46 @@
+[package]
+name = "hl-omm-connectors"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+hl-omm-core = { path = "../core" }
+
+tokio = { workspace = true }
+tokio-tungstenite = { workspace = true }
+futures = { workspace = true }
+futures-util = { workspace = true }
+
+reqwest = { workspace = true }
+url = { workspace = true }
+
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+ethers = { workspace = true }
+secp256k1 = { workspace = true }
+rsa = { workspace = true }
+sha2 = { workspace = true }
+sha3 = { workspace = true }
+hex = { workspace = true }
+base64 = { workspace = true }
+
+rust_decimal = { workspace = true }
+rust_decimal_macros = { workspace = true }
+chrono = { workspace = true }
+parking_lot = { workspace = true }
+dashmap = { workspace = true }
+arc-swap = { workspace = true }
+
+tracing = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+once_cell = { workspace = true }
+uuid = { workspace = true }
+
+rmp-serde = { workspace = true }
+hmac = "0.12"
+rand = { workspace = true }

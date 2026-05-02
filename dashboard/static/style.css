@@ -1,0 +1,53 @@
+:root {
+  --bg: #0b0f17;
+  --panel: #121826;
+  --panel-2: #1a2233;
+  --border: #1f2a3d;
+  --text: #d8e1f1;
+  --muted: #7c8aa3;
+  --accent: #5cffd1;
+  --accent-2: #7c9bff;
+  --bad: #ff6b81;
+  --good: #5cffd1;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text);
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+
+header {
+  padding: 16px 24px;
+  border-bottom: 1px solid var(--border);
+  display: flex; flex-direction: column; gap: 12px;
+  background: linear-gradient(180deg, #0d121d 0%, #0b0f17 100%);
+  position: sticky; top: 0; z-index: 10;
+}
+.brand { display: flex; align-items: center; gap: 12px; }
+.brand .logo { color: var(--accent); font-size: 22px; }
+.brand h1 { margin: 0; font-size: 18px; font-weight: 600; letter-spacing: 0.2px; }
+
+.kpis { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; }
+.kpi {
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: 10px; padding: 10px 12px;
+}
+.kpi span { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; }
+.kpi b { display: block; font-size: 18px; margin-top: 4px; font-variant-numeric: tabular-nums; }
+
+main { padding: 16px 24px 64px; display: grid; grid-template-columns: 1fr; gap: 16px; }
+
+.panel { background: var(--panel); border: 1px solid var(--border);
+  border-radius: 12px; padding: 14px 16px; }
+.panel h2 { margin: 0 0 8px; font-size: 14px; color: var(--accent-2); letter-spacing: 0.04em; }
+.panel .hint { margin: 0 0 10px; font-size: 12px; color: var(--muted); }
+.panel.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.plot { width: 100%; height: 320px; }
+.plot.tall { height: 460px; }
+
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); font-variant-numeric: tabular-nums; }
+th { color: var(--muted); font-weight: 500; text-transform: uppercase; font-size: 11px; letter-spacing: 0.06em; }
+tbody tr:hover { background: var(--panel-2); }
+
+.kill-on { color: var(--bad); }
+.kill-off { color: var(--good); }

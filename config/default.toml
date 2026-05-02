@@ -1,0 +1,75 @@
+# Default configuration for the Hyperliquid Outcome MM bot.
+#
+# Override anything here from the environment, e.g.:
+#   HL_OMM__VENUES__HYPERLIQUID_PK=0x...
+#   HL_OMM__NETWORK__IS_MAINNET=true
+
+[network]
+is_mainnet = true
+
+[risk]
+max_gross_notional_usd = "50000"
+max_per_market_qty     = "5000"
+max_open_orders_per_market = 16
+max_drawdown_usd       = "2000"
+stop_on_disconnect     = true
+
+[dashboard]
+bind       = "127.0.0.1:8787"
+static_dir = "dashboard/static"
+
+[strategy]
+# The first HIP-4 BTC binary on mainnet — daily reset at 06:00 UTC, strike
+# floored to integer USD. Update these daily from the Hyperliquid `info`
+# endpoint before launch.
+market_yes        = "OUT:BTC-78213-2026-05-03-YES"
+market_no         = "OUT:BTC-78213-2026-05-03-NO"
+btc_perp_coin     = "BTC"
+btc_strike_usd    = "78213"
+# 2026-05-03 06:00:00 UTC in nanoseconds.
+btc_expiry_ts_ns  = 1_777_968_000_000_000_000
+
+# Same logical event listed on Polymarket (token IDs from gamma-api).
+# Leave these blank to disable the cross-venue arb leg.
+polymarket_yes_id = ""
+polymarket_no_id  = ""
+kalshi_yes_ticker = ""
+kalshi_no_ticker  = ""
+
+[strategy.avellaneda]
+gamma              = 0.6
+kappa              = 1.5
+min_size           = "10"
+max_inventory      = "2000"
+vol_half_life_secs = 60.0
+tick               = "0.001"
+
+[strategy.parity]
+min_edge                = 0.015
+max_qty                 = "50"
+delta_rebalance_thresh  = "5"
+sigma_prior_annual      = 0.65
+vol_half_life_secs      = 90.0
+
+[strategy.arb]
+min_edge_bps           = 35
+max_notional_usd       = "2000"
+max_slippage_bps       = 20
+bridging_bps_polygon   = 15
+
+[strategy.arb.fee_bps_per_venue]
+"hl-outcome" = -25
+"polymarket" = 50
+"kalshi"     = 70
+
+[venues]
+# Set these via env vars in production. The TOML defaults are blank.
+hyperliquid_pk        = ""
+hyperliquid_vault     = ""
+polymarket_key        = ""
+polymarket_secret     = ""
+polymarket_passphrase = ""
+polymarket_maker      = ""
+kalshi_key_id         = ""
+kalshi_pem_path       = ""
+kalshi_ws_token       = ""
