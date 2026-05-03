@@ -17,8 +17,14 @@ config/secrets.toml
 *.log
 *.ndjson
 
+# Captured snapshots — produced on demand by scripts/scrape_live.py.
+# We don't commit these because they should always be re-captured from
+# the live or historical APIs.
+docs/diagrams/live_snapshots.json
+
 # Editors
 .idea/
 .vscode/
 *.swp
 .DS_Store
+__pycache__/

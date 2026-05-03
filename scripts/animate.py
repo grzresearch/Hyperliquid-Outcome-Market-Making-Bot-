@@ -61,9 +61,21 @@ GOLD = "#ffb347"
 def load_snapshots():
     if not SNAP_PATH.exists():
         raise SystemExit(
-            f"missing {SNAP_PATH}; run `python3 scripts/scrape_live.py` first"
+            f"missing {SNAP_PATH}\n"
+            "run `python3 scripts/scrape_live.py` first to capture a live or\n"
+            "historical window from the public venue APIs. No synthetic\n"
+            "fallback is bundled with this repo."
         )
-    return json.loads(SNAP_PATH.read_text())["snapshots"]
+    snaps = json.loads(SNAP_PATH.read_text()).get("snapshots") or []
+    if not snaps:
+        raise SystemExit(f"{SNAP_PATH} contains no snapshots")
+    src = snaps[0].get("source")
+    if src not in ("live", "historical"):
+        raise SystemExit(
+            f"{SNAP_PATH} has source={src!r}; expected 'live' or 'historical'.\n"
+            "Re-run scripts/scrape_live.py — synthetic data is no longer accepted."
+        )
+    return snaps
 
 
 def style_3d(ax):

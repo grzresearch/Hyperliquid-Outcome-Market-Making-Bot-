@@ -139,21 +139,29 @@ all evolving tick-by-tick on real venue data captured by
 
 ### Reproducing it from your own data
 
+The scraper has two modes and **no synthetic fallback** — every datapoint
+that ends up in `docs/diagrams/live_snapshots.json` is fetched from a
+public venue or archive endpoint:
+
+| `--mode`      | Source                                                                                              |
+|---------------|------------------------------------------------------------------------------------------------------|
+| `live`        | Hyperliquid `/info` (`allMids`, `l2Book`), Polymarket gamma + CLOB, Kalshi v2.                       |
+| `historical`  | Hyperliquid `/info` `candleSnapshot` (BTC perp), Polymarket CLOB `/prices-history`, Kalshi `/candlesticks`. |
+| `auto` (default) | Tries `live` first; if any venue is unreachable, falls back to `historical` for the same window. |
+
 ```bash
-# 1. Capture a 60-second window from the public endpoints
-#    (HL /info, Polymarket gamma + CLOB, Kalshi v2).
-python3 scripts/scrape_live.py --secs 60 --interval 0.5
+# 1. Capture a 60-second window from the public endpoints.
+python3 scripts/scrape_live.py --secs 60 --interval 0.5 \
+    --kalshi-ticker KXBTCD-26MAY03-78213-Y    # only required in historical mode
 
 # 2. Replay the snapshots as four animated GIFs under docs/diagrams/.
 python3 scripts/animate.py
 ```
 
-If the machine cannot reach the venues (sandboxed CI, etc.) the scrape
-script falls back to a synthetic generator anchored to the actual
-market state on **2 May 2026**: HL HIP-4 `BTC ≥ 78,213` YES ≈ 0.62,
-Polymarket comparable ≈ 0.69, Kalshi `BTC ≥ 76,000` YES ≈ 0.64, BTC
-perp mid ≈ \$76,247. The dashboard GIF and the strategy GIFs in this
-README were rendered against that anchored window.
+If both modes fail (e.g. fully air-gapped host), the script exits
+non-zero — it will never write fabricated data. The animation script
+refuses to run on a snapshot file whose `source` is anything other
+than `"live"` or `"historical"`.
 
 The web dashboard adds three interactive 3D Plotly panels on top of
 this static replay (AS quote band, cross-venue divergence,
@@ -417,10 +425,11 @@ in a trading binary that ought to fail fast.
 │   ├── dashboard.gif             #   ↳ live performance dashboard replay
 │   ├── as_surface.gif            #   ↳ Avellaneda-Stoikov quote band
 │   ├── inefficiency.gif          #   ↳ cross-venue inefficiency surface
-│   ├── parity.gif                #   ↳ Black-Scholes digital surface
-│   └── live_snapshots.json       #   ↳ time-series captured by scrape_live.py
+│   └── parity.gif                #   ↳ Black-Scholes digital surface
+│                                 #   live_snapshots.json is generated on
+│                                 #   demand by scrape_live.py — never committed.
 ├── scripts/
-│   ├── scrape_live.py            # live capture (HL/Poly/Kalshi) → JSON
+│   ├── scrape_live.py            # live or historical capture → JSON (no synth)
 │   └── animate.py                # JSON snapshots → animated GIFs
 └── crates
     ├── core              # venue-neutral domain types (Order, OrderBook, …)
