@@ -15,6 +15,7 @@
 //! position; its drift in probability space is bounded by `[0, 1]` so the
 //! same Brownian assumption is locally fine on minute-to-hour horizons.
 use crate::common::{Quote, StrategyContext, StrategyEvent, StrategyId};
+use crate::kelly::{kelly_continuous, size_from_kelly, KellyParams};
 use hl_omm_core::{
     ClientOrderId, InstrumentKind, MarketKey, OrderBook, Price, Qty, Side, Venue,
 };
@@ -41,6 +42,10 @@ pub struct AvellanedaParams {
     pub vol_half_life_secs: f64,
     /// Tick rounding for posted prices.
     pub tick: Decimal,
+    /// Total bot equity in USD — drives the Kelly cap on quoted size.
+    pub equity_usd: Decimal,
+    /// Fractional Kelly knobs for the per-quote size cap.
+    pub kelly: KellyParams,
 }
 
 impl Default for AvellanedaParams {
@@ -52,6 +57,8 @@ impl Default for AvellanedaParams {
             max_inventory: dec!(2000),
             vol_half_life_secs: 60.0,
             tick: dec!(0.001),
+            equity_usd: dec!(50_000),
+            kelly: KellyParams::default(),
         }
     }
 }
@@ -151,9 +158,25 @@ impl AvellanedaStoikov {
         // Inventory throttle — pull the side that would push us further over
         // the cap.
         let cap = self.params.max_inventory;
-        let qty = self.params.min_size;
         let post_bid = q < cap.to_f64().unwrap_or(0.0);
         let post_ask = -q < cap.to_f64().unwrap_or(0.0);
+
+        // ---------- Kelly sizing per quote ----------
+        // The maker's per-fill expected return is the captured half-spread
+        // δ, with realised dispersion σ_per_sec · √(expected fill latency).
+        // We approximate the latency by 1 second; this gives a Kelly
+        // fraction of δ / σ². The result is converted to a YES-token qty
+        // via the configured equity, then floored to `min_size`.
+        let mu_per_fill = half_spread.max(1e-9);
+        let sigma_per_fill = sigma.max(1e-9);
+        let kelly_f = kelly_continuous(mu_per_fill, sigma_per_fill);
+        let kelly_qty = size_from_kelly(
+            kelly_f,
+            self.params.equity_usd,
+            Decimal::from_f64_retain(reservation).unwrap_or(dec!(0.5)),
+            &self.params.kelly,
+        );
+        let qty = if kelly_qty > self.params.min_size { kelly_qty } else { self.params.min_size };
 
         if post_bid {
             self.emit(self.yes_market.clone(), Side::Buy, bid, qty);

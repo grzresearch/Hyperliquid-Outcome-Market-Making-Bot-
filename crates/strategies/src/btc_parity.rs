@@ -25,6 +25,7 @@
 //! token. The bot rebalances the perp leg every time the YES position drifts
 //! by more than `delta_rebalance_thresh`.
 use crate::common::{Quote, StrategyContext, StrategyEvent, StrategyId};
+use crate::kelly::{binary_trade_size, KellyParams};
 use hl_omm_core::{ClientOrderId, MarketKey, Price, Qty, Side, Venue};
 use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
@@ -39,7 +40,7 @@ use tracing::{info, trace};
 pub struct ParityParams {
     /// Mispricing threshold in probability points (e.g. 0.01 = 1 %).
     pub min_edge: f64,
-    /// Maximum size to take per signal in YES tokens.
+    /// Hard ceiling on YES tokens per signal (Kelly will usually pick less).
     pub max_qty: Decimal,
     /// Inventory size at which the perp delta-hedge rebalances.
     pub delta_rebalance_thresh: Decimal,
@@ -47,6 +48,10 @@ pub struct ParityParams {
     pub sigma_prior_annual: f64,
     /// Half-life (seconds) for the perp realised-vol estimator.
     pub vol_half_life_secs: f64,
+    /// Total bot equity in USD — used by the Kelly sizer.
+    pub equity_usd: Decimal,
+    /// Fractional Kelly knobs.
+    pub kelly: KellyParams,
 }
 
 impl Default for ParityParams {
@@ -57,6 +62,8 @@ impl Default for ParityParams {
             delta_rebalance_thresh: dec!(5),
             sigma_prior_annual: 0.65,
             vol_half_life_secs: 90.0,
+            equity_usd: dec!(50_000),
+            kelly: KellyParams::default(),
         }
     }
 }
@@ -196,8 +203,19 @@ impl BtcParity {
             .map(|l| l.price.0)
             .or_else(|| yes_book.best_ask().map(|l| l.price.0))
             .unwrap_or(Decimal::from_f64_retain(yes_mid).unwrap_or(dec!(0.5)));
-        let qty = self.params.max_qty;
+
+        // ---------- Kelly-optimal sizing ----------
+        // We have an explicit point estimate (`p_fair`) and a market price
+        // (`yes_mid`); the binary Kelly closed-form gives us the exact
+        // log-optimal stake.
+        let (signed_qty, kelly_f) =
+            binary_trade_size(p_fair, yes_mid, self.params.equity_usd, &self.params.kelly);
+        let qty = signed_qty.abs().min(self.params.max_qty);
+        if qty <= Decimal::ZERO {
+            return;
+        }
         let perp_qty = (Decimal::try_from(delta).unwrap_or(Decimal::ZERO) * qty).round_dp(4);
+        info!(kelly_f = kelly_f, qty = %qty, "btc parity Kelly sized");
 
         info!(edge = edge, p_fair = p_fair, yes_mid = yes_mid, "btc parity signal");
 

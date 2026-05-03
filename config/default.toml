@@ -43,6 +43,13 @@ min_size           = "10"
 max_inventory      = "2000"
 vol_half_life_secs = 60.0
 tick               = "0.001"
+equity_usd         = "50000"
+
+[strategy.avellaneda.kelly]
+fraction       = 0.25
+max_fraction   = 0.05
+min_qty        = "5"
+size_decimals  = 2
 
 [strategy.parity]
 min_edge                = 0.015
@@ -50,12 +57,27 @@ max_qty                 = "50"
 delta_rebalance_thresh  = "5"
 sigma_prior_annual      = 0.65
 vol_half_life_secs      = 90.0
+equity_usd              = "50000"
+
+[strategy.parity.kelly]
+fraction       = 0.25
+max_fraction   = 0.10
+min_qty        = "1"
+size_decimals  = 2
 
 [strategy.arb]
 min_edge_bps           = 35
 max_notional_usd       = "2000"
 max_slippage_bps       = 20
 bridging_bps_polygon   = 15
+equity_usd             = "50000"
+edge_var_bps           = 80.0
+
+[strategy.arb.kelly]
+fraction       = 0.25
+max_fraction   = 0.10
+min_qty        = "1"
+size_decimals  = 2
 
 [strategy.arb.fee_bps_per_venue]
 "hl-outcome" = -25

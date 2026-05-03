@@ -11,9 +11,13 @@
 pub mod avellaneda;
 pub mod btc_parity;
 pub mod common;
+pub mod kelly;
 pub mod xvenue_arb;
 
 pub use avellaneda::AvellanedaStoikov;
 pub use btc_parity::BtcParity;
 pub use common::{Quote, StrategyContext, StrategyEvent, StrategyId};
+pub use kelly::{
+    binary_trade_size, kelly_arb, kelly_binary, kelly_continuous, size_from_kelly, KellyParams,
+};
 pub use xvenue_arb::CrossVenueArb;

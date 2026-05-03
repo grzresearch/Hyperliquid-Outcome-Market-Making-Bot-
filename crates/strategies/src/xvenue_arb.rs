@@ -16,6 +16,7 @@
 //!   only on close. The bot prefers the maker side on Hyperliquid wherever
 //!   possible.
 use crate::common::{Quote, StrategyContext, StrategyEvent, StrategyId};
+use crate::kelly::{kelly_arb, size_from_kelly, KellyParams};
 use hl_omm_core::{ClientOrderId, MarketKey, OutcomeKey, OutcomeSide, Price, Qty, Side, Venue};
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
@@ -32,6 +33,12 @@ pub struct ArbParams {
     pub max_slippage_bps: i64,
     pub fee_bps_per_venue: HashMap<String, i64>,
     pub bridging_bps_polygon: i64,
+    /// Total bot equity in USD — used by the Kelly sizer.
+    pub equity_usd: Decimal,
+    /// Fractional Kelly (0.25 = quarter-Kelly).
+    pub kelly: KellyParams,
+    /// Approximate edge variance in bps (drives the Kelly denominator).
+    pub edge_var_bps: f64,
 }
 
 impl Default for ArbParams {
@@ -46,6 +53,9 @@ impl Default for ArbParams {
             max_slippage_bps: 20,
             fee_bps_per_venue: fees,
             bridging_bps_polygon: 15,
+            equity_usd: dec!(50_000),
+            kelly: KellyParams::default(),
+            edge_var_bps: 80.0,
         }
     }
 }
@@ -133,9 +143,24 @@ impl CrossVenueArb {
             return;
         }
 
-        let max_qty = buy_q.ask_size.min(sell_q.bid_size);
+        // ---------- Kelly-optimal sizing ----------
+        // Treat the realised edge as Gaussian with mean `net_edge_bps` and
+        // std-dev `edge_var_bps`. Continuous Kelly gives the optimal share
+        // of equity to stake; we then clip to top-of-book depth.
+        let kelly_f = kelly_arb(
+            edge_bps.to_string().parse::<f64>().unwrap_or(0.0),
+            total_cost_bps as f64,
+            self.params.edge_var_bps,
+        );
+        let kelly_qty = size_from_kelly(
+            kelly_f,
+            self.params.equity_usd,
+            buy_q.ask,
+            &self.params.kelly,
+        );
+        let depth_qty = buy_q.ask_size.min(sell_q.bid_size);
         let cap_qty = self.params.max_notional_usd / buy_q.ask.max(dec!(0.01));
-        let qty = max_qty.min(cap_qty);
+        let qty = depth_qty.min(cap_qty).min(kelly_qty);
         if qty <= Decimal::ZERO {
             return;
         }
@@ -148,6 +173,7 @@ impl CrossVenueArb {
             sell_px = %sell_q.bid,
             edge_bps = edge_bps.to_string(),
             net_bps = net_edge_bps,
+            kelly_f = kelly_f,
             qty = %qty,
             "x-venue arb signal"
         );

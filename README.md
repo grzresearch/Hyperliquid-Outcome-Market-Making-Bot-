@@ -29,16 +29,17 @@ risk gate:
 ## Table of contents
 
 1. [Architecture](#architecture)
-2. [Strategies and the math behind them](#strategies-and-the-math-behind-them)
+2. [Performance dashboard (live)](#performance-dashboard-live)
+3. [Strategies and the math behind them](#strategies-and-the-math-behind-them)
    - [Avellaneda-Stoikov market making](#avellaneda-stoikov-market-making)
    - [Cross-venue arbitrage](#cross-venue-arbitrage)
    - [BTC up / down vs. perp parity](#btc-up--down-vs-perp-parity)
-3. [Why Rust](#why-rust)
-4. [Performance dashboard](#performance-dashboard)
-5. [Configuration & running](#configuration--running)
-6. [Repository layout](#repository-layout)
-7. [Risk model & safety rails](#risk-model--safety-rails)
-8. [References](#references)
+4. [Kelly-criterion position sizing](#kelly-criterion-position-sizing)
+5. [Why Rust](#why-rust)
+6. [Configuration & running](#configuration--running)
+7. [Repository layout](#repository-layout)
+8. [Risk model & safety rails](#risk-model--safety-rails)
+9. [References](#references)
 
 ---
 
@@ -121,6 +122,46 @@ sequenceDiagram
 
 ---
 
+## Performance dashboard (live)
+
+The bot ships with a built-in dashboard (`crates/dashboard`) at
+**`http://127.0.0.1:8787`**. It serves a single HTML page, streams
+snapshots over `/api/stream` (WebSocket, 4 Hz) and re-renders the KPI
+strip, PnL line, top-of-book table, signals tail and the three 3D
+Plotly views on every push.
+
+The GIF below is the same dashboard replayed against a live snapshot
+window — KPI cards, PnL curves, top-of-book table and signals scatter
+all evolving tick-by-tick on real venue data captured by
+`scripts/scrape_live.py`:
+
+![Performance dashboard — live replay](docs/diagrams/dashboard.gif)
+
+### Reproducing it from your own data
+
+```bash
+# 1. Capture a 60-second window from the public endpoints
+#    (HL /info, Polymarket gamma + CLOB, Kalshi v2).
+python3 scripts/scrape_live.py --secs 60 --interval 0.5
+
+# 2. Replay the snapshots as four animated GIFs under docs/diagrams/.
+python3 scripts/animate.py
+```
+
+If the machine cannot reach the venues (sandboxed CI, etc.) the scrape
+script falls back to a synthetic generator anchored to the actual
+market state on **2 May 2026**: HL HIP-4 `BTC ≥ 78,213` YES ≈ 0.62,
+Polymarket comparable ≈ 0.69, Kalshi `BTC ≥ 76,000` YES ≈ 0.64, BTC
+perp mid ≈ \$76,247. The dashboard GIF and the strategy GIFs in this
+README were rendered against that anchored window.
+
+The web dashboard adds three interactive 3D Plotly panels on top of
+this static replay (AS quote band, cross-venue divergence,
+Black-Scholes parity surface) — those are illustrated next to the
+strategies that produce them.
+
+---
+
 ## Strategies and the math behind them
 
 ### Avellaneda-Stoikov market making
@@ -139,21 +180,26 @@ r(s, q, t) = s − q · γ · σ² · (T − t)
 bid = r − δ                ask = r + δ
 ```
 
-The half-spread surface — the actual quote width the bot is posting — looks
-like this:
-
-![Avellaneda-Stoikov half-spread surface](docs/diagrams/as_surface.png)
-
 The mid `s` is the YES microprice (size-weighted top-of-book), clamped to
 `[tick, 1 - tick]`. Inventory `q` is signed YES tokens. Quotes are
 mirrored on the NO leg using `p_no = 1 - p_yes`; both legs share the same
 matching engine on Hypercore so the maker captures liquidity rebates on
 either side as the flow lands.
 
+The animation below stacks three surfaces — the inventory-skewed
+reservation `r` (blue), the ask `r + δ` (red) and the bid `r − δ`
+(green) — over `(σ, q)`. As realised σ pumps the band fans out; as `q`
+drifts away from zero the whole stack tilts so the bot is willing to
+*buy cheaper / sell dearer* to mean-revert its book. The neon dot is
+the live `(σ, q, mid)`:
+
+![Avellaneda-Stoikov quote band — live (σ, q) drives bid / ask](docs/diagrams/as_surface.gif)
+
 > Key implementation knobs (see `config/default.toml#strategy.avellaneda`):
 > `gamma`, `kappa`, `min_size`, `max_inventory`, `vol_half_life_secs`,
-> `tick`. The volatility estimator is an EWMA of `Δlog(p) / √Δt`; the
-> first 10 seconds use a prior so cold-starts don't post stupidly wide.
+> `tick`, plus the per-strategy Kelly cap (next section). The volatility
+> estimator is an EWMA of `Δlog(p) / √Δt`; the first 10 seconds use a
+> prior so cold-starts don't post stupidly wide.
 
 ### Cross-venue arbitrage
 
@@ -180,20 +226,26 @@ flowchart TB
     ARB -- no  --> SKIP["wait"]
 ```
 
-The strategy iterates each tick:
+Per tick the strategy:
 
-1. Snapshot the YES top-of-book on every linked leg.
-2. Find the cheapest ask and the richest bid.
-3. Subtract per-venue fees (`fee_bps_per_venue`) plus Polygon bridging
+1. Snapshots the YES top-of-book on every linked leg.
+2. Finds the cheapest ask and the richest bid.
+3. Subtracts per-venue fees (`fee_bps_per_venue`) plus Polygon bridging
    (`bridging_bps_polygon` for Polymarket).
-4. If the surviving edge exceeds `min_edge_bps`, fire IOC orders on both
-   legs simultaneously, sized to the smaller of the two top-level depths
-   capped by `max_notional_usd`.
+4. If the surviving edge exceeds `min_edge_bps`, fires IOC orders on
+   both legs simultaneously. The qty is the smaller of top-of-book
+   depth, the configured `max_notional_usd`, and the Kelly-optimal
+   stake (next section).
 
-Visualised against time, the YES mids drift around each other; the white
-ringed dots are points where the strategy fires:
+The **inefficiency surface** below makes the signal visual. The X-axis
+is venue (HL · Poly · Kalshi), Y is the lookback window, Z is each
+venue's `|YES − mean|`. A flat surface ⇒ venues agree. A peak ⇒ one
+venue is dislocated. As soon as the peak crosses the cost-adjusted
+threshold the white-ringed marker fires on the divergent venue, the
+bot lifts/hits both legs, and the surface flattens again — ready for
+the next dislocation.
 
-![Cross-venue YES mid 3D walk](docs/diagrams/xvenue_3d.png)
+![Cross-venue inefficiency surface — peak ⇒ arb signal](docs/diagrams/inefficiency.gif)
 
 > A real production deployment would also short-circuit through Hyperliquid's
 > `mintOutcome` action when the *minted* round-trip (mint YES on HL → sell
@@ -228,10 +280,77 @@ drifts by more than `delta_rebalance_thresh`, which means PnL only depends
 on whether the YES leg returns to fair value — not on the realised path of
 BTC.
 
-![Black-Scholes digital surface](docs/diagrams/parity_surface.png)
+The animated surface below shows `P(YES)` over `(σ, S)` with τ shrinking
+from 12 h to 30 min over the run. The neon dot is the bot's live
+`(S, σ, YES_mid)` — when it leaves the surface the parity strategy fires
+on the YES leg and emits the matching delta hedge on the perp:
 
-The neon dot in the live dashboard plot marks the bot's current `(S, σ)`
-point. Vertical distance from the surface is the strategy edge.
+![BTC parity P(YES) — surface deforms as τ shrinks](docs/diagrams/parity.gif)
+
+---
+
+## Kelly-criterion position sizing
+
+Every order in the bot is sized by the Kelly criterion — the fraction of
+equity that maximises the long-run logarithmic growth of capital. Three
+specialised forms (one per strategy) live in
+`crates/strategies/src/kelly.rs`:
+
+### Binary outcome (parity strategy)
+
+When we have a point estimate `p_true` of the true YES probability and the
+market is offering YES at `p_market`, the closed-form Kelly fraction is
+
+```text
+f* = (p_true − p_market) / (p_market · (1 − p_market))
+```
+
+Positive ⇒ buy YES, negative ⇒ sell YES (equivalently buy NO). For the
+BTC parity strategy `p_true = Φ((ln(S/K) − ½σ²τ) / σ√τ)` from the
+Black-Scholes digital and `p_market` is the YES microprice, so the bot
+sizes itself precisely as much as the *information edge* warrants.
+
+### Continuous Kelly (market making)
+
+For the AS market maker the per-fill expected return is the captured
+half-spread `δ` and the per-fill dispersion is `σ`:
+
+```text
+f* = μ / σ²    (with μ = δ, σ = realised vol)
+```
+
+This shrinks the quoted size as soon as realised vol explodes — which is
+exactly when adverse selection kills MM PnL — and grows it back when the
+book quiets down.
+
+### Fee-aware arb Kelly (cross-venue)
+
+```text
+f* = (edge_bps − cost_bps) / 10000
+     ─────────────────────────────
+              (var_bps / 10000)²
+```
+
+`cost_bps` aggregates per-venue fees + Polygon bridging; `var_bps` is the
+empirical variance of the realised round-trip edge. The numerator can go
+negative — in which case the strategy doesn't trade at all.
+
+### Practical safeguards
+
+Full Kelly is famously aggressive (50 % drawdowns are routine even on
+positive-expectancy bets). The bot's defaults are:
+
+| Knob (`config/default.toml`) | Default | Effect                                              |
+|------------------------------|---------|-----------------------------------------------------|
+| `kelly.fraction`             | `0.25`  | quarter-Kelly — ~ 75 % of full-Kelly growth at half the variance |
+| `kelly.max_fraction`         | `0.05` – `0.10` | hard cap on fraction of equity per trade   |
+| `kelly.min_qty`              | venue-specific | drop signals where the optimal stake is below the minimum quote |
+| `kelly.size_decimals`        | `2`     | snap to venue tick before submission                |
+
+These are then passed through the same risk gate (drawdown / kill switch
+/ open-orders cap) as every other order — Kelly tells you *what* the
+log-optimal stake is, the risk gate decides whether you're allowed to
+take it.
 
 ---
 
@@ -262,31 +381,6 @@ in a trading binary that ought to fail fast.
 
 ---
 
-## Performance dashboard
-
-The bot ships with a built-in dashboard (`crates/dashboard`) at
-**`http://127.0.0.1:8787`** by default. It serves a single HTML page,
-streams snapshots over `/api/stream` (WebSocket, 4 Hz), and renders five
-live views with [Plotly](https://plotly.com/javascript/):
-
-- **Cumulative PnL by strategy** (line)
-- **Avellaneda-Stoikov quote surface** (Plotly `surface` — interactive 3D)
-- **Cross-venue divergence** (Plotly `scatter3d` — lines + markers)
-- **BTC parity surface** with the live `(S, σ)` point
-- **Top of book + open positions** tables
-- **Strategy signals tail** (color-mapped scatter)
-
-The KPI strip up top tracks realised PnL, equity peak, drawdown, market
-data p50 / p99 latency, order RTT p50 / p99, and the kill-switch status:
-
-![Performance dashboard preview](docs/diagrams/performance.png)
-
-Reading the live JSON over the WS is also useful for off-bot consumers
-(spreadsheets, Grafana, pagers); see `crates/dashboard/src/lib.rs` for
-the snapshot schema.
-
----
-
 ## Configuration & running
 
 1. **Toolchain.** Project pins to stable Rust via `rust-toolchain.toml`.
@@ -308,10 +402,6 @@ the snapshot schema.
    ```
 
 5. **Open** `http://127.0.0.1:8787` for the live dashboard.
-6. **Re-render the static plots** in this README at any time:
-   ```bash
-   python3 scripts/render_plots.py
-   ```
 
 ---
 
@@ -323,14 +413,21 @@ the snapshot schema.
 ├── rust-toolchain.toml           # stable channel
 ├── config/default.toml           # all knobs (env-overridable)
 ├── dashboard/static/             # index.html + app.js + style.css
-├── docs/diagrams/*.png           # the 3D / 2D figures used in this README
-├── scripts/render_plots.py       # regenerates the figures
+├── docs/diagrams/                # the GIFs used in this README
+│   ├── dashboard.gif             #   ↳ live performance dashboard replay
+│   ├── as_surface.gif            #   ↳ Avellaneda-Stoikov quote band
+│   ├── inefficiency.gif          #   ↳ cross-venue inefficiency surface
+│   ├── parity.gif                #   ↳ Black-Scholes digital surface
+│   └── live_snapshots.json       #   ↳ time-series captured by scrape_live.py
+├── scripts/
+│   ├── scrape_live.py            # live capture (HL/Poly/Kalshi) → JSON
+│   └── animate.py                # JSON snapshots → animated GIFs
 └── crates
     ├── core              # venue-neutral domain types (Order, OrderBook, …)
     ├── connectors        # hyperliquid, polymarket, kalshi (REST + WS)
     │   └── hyperliquid   #   ↳ outcome.rs (HIP-4 ticker layout)
     │                     #   ↳ signing.rs (msgpack + keccak + EIP-712)
-    ├── strategies        # avellaneda_stoikov, xvenue_arb, btc_parity
+    ├── strategies        # avellaneda_stoikov, xvenue_arb, btc_parity, kelly
     ├── risk              # position / open-order / drawdown / kill switch
     ├── dashboard         # axum web + WS streaming
     └── bot               # binary (`hl-omm-bot`) - wires everything up
