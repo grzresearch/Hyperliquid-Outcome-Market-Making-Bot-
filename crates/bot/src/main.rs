@@ -81,6 +81,15 @@ struct VenuesCfg {
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 8)]
 async fn main() -> Result<()> {
+    // Auto-load `.env` (and any other dotenv path the user points us at via
+    // HL_OMM_DOTENV) before tracing / config init, so RUST_LOG and
+    // HL_OMM__* overrides defined there take effect for this process.
+    let dotenv_path = std::env::var("HL_OMM_DOTENV").ok();
+    let dotenv_loaded = match dotenv_path.as_deref() {
+        Some(p) => dotenvy::from_path(p).is_ok(),
+        None => dotenvy::dotenv().is_ok(),
+    };
+
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -89,6 +98,9 @@ async fn main() -> Result<()> {
         .with_target(true)
         .json()
         .init();
+    if dotenv_loaded {
+        tracing::info!(path = ?dotenv_path.as_deref().unwrap_or(".env"), "loaded dotenv");
+    }
 
     let cfg = config_io::load()?;
     info!("starting Hyperliquid Outcome MM bot");

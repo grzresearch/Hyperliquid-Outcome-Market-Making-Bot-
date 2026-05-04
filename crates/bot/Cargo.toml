@@ -40,3 +40,4 @@ thiserror = { workspace = true }
 once_cell = { workspace = true }
 uuid = { workspace = true }
 rand = { workspace = true }
+dotenvy = "0.15"
