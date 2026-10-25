@@ -1,5 +1,7 @@
 # Hyperliquid Outcome Market-Making Bot
 
+![Rust 1.85+](https://img.shields.io/badge/rust-1.85%2B-orange)
+
 A low-latency, multi-strategy market making and arbitrage bot for the new
 **HIP-4 Outcome Markets** that went live on Hyperliquid mainnet on
 **2 May 2026**. Written in Rust because every microsecond on the wire shows
@@ -24,9 +26,7 @@ risk gate:
 > thresholds that reset at 06:00 UTC; the bot ships pre-configured for
 > the very first one (`OUT:BTC-78213-2026-05-03-YES`).
 
----
-
-## Table of contents
+## Contents
 
 1. [Architecture](#architecture)
 2. [Performance dashboard (live)](#performance-dashboard-live)
@@ -36,12 +36,15 @@ risk gate:
    - [BTC up / down vs. perp parity](#btc-up--down-vs-perp-parity)
 4. [Kelly-criterion position sizing](#kelly-criterion-position-sizing)
 5. [Why Rust](#why-rust)
-6. [Configuration & running](#configuration--running)
-7. [Repository layout](#repository-layout)
-8. [Risk model & safety rails](#risk-model--safety-rails)
-9. [References](#references)
-
----
+6. [Installation](#installation)
+7. [Configuration](#configuration)
+8. [Usage](#usage)
+9. [Testing](#testing)
+10. [Repository layout](#repository-layout)
+11. [Risk model & safety rails](#risk-model--safety-rails)
+12. [References](#references)
+13. [License](#license)
+14. [Disclaimer](#disclaimer)
 
 ## Architecture
 
@@ -120,8 +123,6 @@ sequenceDiagram
     CN-->>BC: OrderUpdate / Fill
 ```
 
----
-
 ## Performance dashboard (live)
 
 The bot ships with a built-in dashboard (`crates/dashboard`) at
@@ -167,8 +168,6 @@ The web dashboard adds three interactive 3D Plotly panels on top of
 this static replay (AS quote band, cross-venue divergence,
 Black-Scholes parity surface) — those are illustrated next to the
 strategies that produce them.
-
----
 
 ## Strategies and the math behind them
 
@@ -295,8 +294,6 @@ on the YES leg and emits the matching delta hedge on the perp:
 
 ![BTC parity P(YES) — surface deforms as τ shrinks](docs/diagrams/parity.gif)
 
----
-
 ## Kelly-criterion position sizing
 
 Every order in the bot is sized by the Kelly criterion — the fraction of
@@ -360,8 +357,6 @@ These are then passed through the same risk gate (drawdown / kill switch
 log-optimal stake is, the risk gate decides whether you're allowed to
 take it.
 
----
-
 ## Why Rust
 
 Every microsecond between a HIP-4 book delta and a re-quoted post-only
@@ -387,38 +382,79 @@ in a trading binary that ought to fail fast.
 > show up directly in the latency histogram. A scripting language would
 > not even keep up with the WS feed at peak.
 
----
+## Installation
 
-## Configuration & running
+1. **Toolchain.** The project pins to stable Rust via `rust-toolchain.toml`
+   (with `rustfmt` and `clippy`). Anything ≥ 1.85 works.
+2. **Build:**
 
-1. **Toolchain.** Project pins to stable Rust via `rust-toolchain.toml`.
-   Anything ≥ 1.85 works.
-2. **Secrets.** Copy `.env.example` to `.env` and fill in:
+   ```bash
+   git clone https://github.com/grzresearch/Hyperliquid-Outcome-Market-Making-Bot-.git
+   cd Hyperliquid-Outcome-Market-Making-Bot-
+   cargo build --release
+   ```
+
+   The release profile uses fat LTO and a single codegen unit, so the first
+   release build takes several minutes.
+3. **Python scripts (optional).** `scripts/scrape_live.py` needs `requests`;
+   `scripts/animate.py` needs `matplotlib` and `numpy`:
+
+   ```bash
+   pip install requests matplotlib numpy
+   ```
+
+## Configuration
+
+1. **Secrets.** Copy `.env.example` to `.env` and fill in:
    - `HL_OMM__VENUES__HYPERLIQUID_PK` — the EOA private key that owns
      your Hyperliquid account (or an API agent wallet).
    - Polymarket API triple (`KEY`, `SECRET`, `PASSPHRASE`, `MAKER`) and
      Kalshi RSA-PSS key path / id, if you want the cross-venue leg.
-3. **Markets.** Edit `config/default.toml#strategy` to match the daily
+
+   The bot auto-loads `.env` from the working directory at startup; point
+   it at another file with `HL_OMM_DOTENV=/path/to/file`.
+2. **Markets.** Edit `config/default.toml#strategy` to match the daily
    HIP-4 contract you want to trade. Tickers follow
    `OUT:<UNDERLYING>-<STRIKE>-<YYYY-MM-DD>-<YES|NO>` (parsed by
    `outcome::parse_outcome_market_id`).
-4. **Build & run:**
+3. **Overrides.** `HL_OMM_CONFIG` selects the configuration file (default
+   `config/default.toml`). Any variable starting with `HL_OMM__` overrides
+   a key in it; the double underscore separates sections, e.g.
+   `HL_OMM__VENUES__HYPERLIQUID_PK` sets `[venues].hyperliquid_pk` and
+   `HL_OMM__NETWORK__IS_MAINNET=false` selects testnet.
 
-   ```bash
-   cargo build --release
-   RUST_LOG=hl_omm=info,info ./target/release/hl-omm-bot
-   ```
+## Usage
 
-5. **Open** `http://127.0.0.1:8787` for the live dashboard.
+Run the bot from the repository root, so that `config/default.toml`,
+`.env` and `dashboard/static/` resolve:
 
----
+```bash
+RUST_LOG=hl_omm=info,info ./target/release/hl-omm-bot
+```
+
+Then open `http://127.0.0.1:8787` for the live dashboard.
+
+To regenerate the README animations from your own data, capture snapshots
+with `scripts/scrape_live.py` and render them with `scripts/animate.py`, as
+described in [Reproducing it from your own data](#reproducing-it-from-your-own-data).
+
+## Testing
+
+```bash
+cargo test --workspace
+```
+
+The unit tests cover the HIP-4 ticker round trip (`connectors`) and the
+Avellaneda-Stoikov and Kelly helpers (`strategies`).
 
 ## Repository layout
 
 ```
 .
 ├── Cargo.toml                    # workspace manifest, release-tuned
+├── Cargo.lock
 ├── rust-toolchain.toml           # stable channel
+├── .env.example                  # template for secrets and env overrides
 ├── config/default.toml           # all knobs (env-overridable)
 ├── dashboard/static/             # index.html + app.js + style.css
 ├── docs/diagrams/                # the GIFs used in this README
@@ -441,8 +477,6 @@ in a trading binary that ought to fail fast.
     ├── dashboard         # axum web + WS streaming
     └── bot               # binary (`hl-omm-bot`) - wires everything up
 ```
-
----
 
 ## Risk model & safety rails
 
@@ -468,8 +502,6 @@ Risk decisions emit a `RiskDecision::{Pass, Resize(qty), Reject(why)}`;
 the strategy router resizes when allowed and logs the rejection with the
 breached limit otherwise.
 
----
-
 ## References
 
 - Hyperliquid Docs — [Info endpoint](https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/info-endpoint),
@@ -489,7 +521,11 @@ breached limit otherwise.
   [Order book API guide](https://www.quantvps.com/blog/kalshi-order-book-api-endpoints-explained)
 - Avellaneda & Stoikov 2008 — *High-frequency trading in a limit order book*
 
----
+## License
+
+The workspace manifest (`Cargo.toml`) declares the MIT license.
+
+## Disclaimer
 
 This bot trades real money on real markets. Read the configuration before
 launch; start in testnet (`HL_OMM__NETWORK__IS_MAINNET=false`); verify the
